@@ -189,13 +189,12 @@ class QueueService(
             # Schedule our next wakeup, and set our state.
             self.__peek_and_schedule()
 
-    def handle_message(self, name, jobs_dict):
-        """We've received a poke with a dictionary of all of the jobs. Update 
-        the schedule.
-        """
-
+    def handle_message(self, name, data):
         if name == scheduler.constants.MT_QUEUE_POKE:
-            self.__update_schedule(jobs_dict)
+            # We've received a poke with a dictionary of all of the jobs. 
+            # Update the schedule.
+
+            self.__update_schedule(data)
         else:
             raise ValueError("Could not handle bus-message of type: [%s]" % \
                              (name,))
@@ -294,6 +293,8 @@ class QueueService(
 
 # TODO(dustin): We should fork this into its own thread after we've tested.
 
+# TODO(dustin): We usually pull the first task to be run off the queue almost 
+#               immediately, instead of honoring its schedule. Fix this.
         for context in jobs:
             self.__run_task(context)
 
