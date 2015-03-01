@@ -118,8 +118,10 @@ class QueueService(
 
         timing_type = elected_types[0]
 
+# TODO(dustin): Still need to test absolute times.
         if timing_type == 'RUN_AT_ABSOLUTE_OBJ':
             absolute_dt = definition['RUN_ABSOLUTE_DT']
+# TODO(dustin): Still need to test time objects.
         elif timing_type == 'RUN_AT_TIME_OBJ':
             absolute_dt = self.__get_next_run_dt_from_time(
                             definition['RUN_AT_TIME_OBJ'])
@@ -135,7 +137,8 @@ class QueueService(
             raise ValueError("Unexpected fallthrough: [%s]" % 
                              (timing_type,))
 
-        # Make sure times are equivalent down to the second.
+        # Round off the time to the second so that all times align to the 
+        # second.
         absolute_dt = absolute_dt.replace(microsecond=0)
 
         return absolute_dt
@@ -201,7 +204,9 @@ class QueueService(
 
     def __get_next_jobs(self):
         """Pop the next job, as well as any adjacent job that is scheduled for 
-        the same time.
+        the same time. Since we wakeup and run based on the time of the next 
+        task to run, the first job we pop will generally have a time that 
+        matches the current time.
         """
 
         # Pop the first.
@@ -221,7 +226,7 @@ class QueueService(
 
         jobs = [context]
 
-        # Pop the adjacnet (if have a matching time).
+        # Pop any adjacent jobs that have a matching time.
 
         while 1:
             try:
@@ -273,6 +278,9 @@ class QueueService(
             _LOGGER.info("Dequeued (%d) jobs. NOW_DT=[%s] EXPECTED_DT=[%s] "
                          "SCHEDULE_DELAY_S=(%.2f)", 
                          len(jobs), now_dt, scheduled_dt, delay_s)
+
+            # Now, reschedule these jobs for their next invocation (we don't 
+            # wait until they're done executing).
 
             for context in jobs:
                 (name, definition, g, l) = context
