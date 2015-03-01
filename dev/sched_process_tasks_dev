@@ -1,0 +1,7 @@
+#!/bin/bash
+
+START_PATH=`pwd`
+
+cd ../scheduler/resources/scripts
+IS_DEBUG=1 SCHED_JOB_PATH=$START_PATH/jobs ./sched_process_tasks_dev
+#IS_DEBUG=1 SCHED_JOB_PATH=$START_PATH/jobs_empty ./sched_process_tasks_dev

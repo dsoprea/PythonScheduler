@@ -1,0 +1,5 @@
+import os
+
+JOB_PATH = os.environ['SCHED_JOB_PATH']
+
+UPDATE_CHECK_INTERVAL_S = 10

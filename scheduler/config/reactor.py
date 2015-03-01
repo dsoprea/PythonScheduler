@@ -1,0 +1,1 @@
+IDLE_WAIT_S = 2
