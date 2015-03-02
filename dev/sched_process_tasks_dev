@@ -3,5 +3,5 @@
 START_PATH=`pwd`
 
 cd ../scheduler/resources/scripts
-IS_DEBUG=1 SCHED_JOB_PATH=$START_PATH/jobs ./sched_process_tasks_dev
+IS_DEBUG=1 SCHED_DO_EMAIL_SINK=1 SCHED_EMAIL_ADMIN_LIST=root@local SCHED_JOB_PATH=$START_PATH/jobs ./sched_process_tasks_dev
 #IS_DEBUG=1 SCHED_JOB_PATH=$START_PATH/jobs_empty ./sched_process_tasks_dev

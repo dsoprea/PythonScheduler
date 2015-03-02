@@ -6,14 +6,13 @@ import collections
 
 import scheduler.constants
 import scheduler.config.services.queue
+import scheduler.config.services.jobs
 import scheduler.registry
 import scheduler.services.service
 import scheduler.services.bus
 import scheduler.utility
 
 _LOGGER = logging.getLogger(__name__)
-
-_TIME_FIELDS = ['RUN_AT_ABSOLUTE_OBJ', 'RUN_AT_TIME_OBJ', 'RUN_AT_INTERVAL_S']
 
 _SCHEDULER_STATE_CLS = collections.namedtuple(
                         '_SCHEDULER_STATE_CLS',
@@ -84,6 +83,11 @@ class QueueService(
         _LOGGER.debug("Setting task queue to READY state (and then going to "
                       "sleep).")
 
+        now_dt = datetime.datetime.now()
+
+        assert next_run_dt >= now_dt, \
+               "Next-run time is in past: [%s]" % (next_run_dt,)
+
         self.__state = _SCHEDULER_STATE_CLS(
                         is_running=True, 
                         is_empty=False,
@@ -105,7 +109,7 @@ class QueueService(
     def __get_absolute_dt_from_definition(self, definition):
         elected_types = [name 
                          for name 
-                         in _TIME_FIELDS 
+                         in scheduler.config.services.jobs.TIME_FIELDS 
                          if definition.get(name) is not None]
 
         elected_types_len = len(elected_types)
@@ -119,14 +123,14 @@ class QueueService(
         timing_type = elected_types[0]
 
 # TODO(dustin): Still need to test absolute times.
-        if timing_type == 'RUN_AT_ABSOLUTE_OBJ':
-            absolute_dt = definition['RUN_ABSOLUTE_DT']
+        if timing_type == scheduler.constants.JF_TIME_ABSOLUTE_OBJ:
+            absolute_dt = definition[scheduler.constants.JF_TIME_ABSOLUTE_OBJ]
 # TODO(dustin): Still need to test time objects.
-        elif timing_type == 'RUN_AT_TIME_OBJ':
+        elif timing_type == scheduler.constants.JF_TIME_TIME_OBJ:
             absolute_dt = self.__get_next_run_dt_from_time(
-                            definition['RUN_AT_TIME_OBJ'])
-        elif timing_type == 'RUN_AT_INTERVAL_S':
-            interval_s = definition['RUN_AT_INTERVAL_S']
+                            definition[scheduler.constants.JF_TIME_TIME_OBJ])
+        elif timing_type == scheduler.constants.JF_TIME_INTERVAL_S:
+            interval_s = definition[scheduler.constants.JF_TIME_INTERVAL_S]
 
             assert interval_s > 0, \
                    "Interval must be greater than zero seconds."
@@ -170,18 +174,25 @@ class QueueService(
             self.__jobs_dict = jobs_dict
 
             run_times = []
+            now_dt = datetime.datetime.now()
             for name, code_info in jobs_dict.items():
                 (definition, g, l) = code_info
 
                 try:
-                    absolute_dt = self.__get_absolute_dt_from_definition(
+                    next_dt = self.__get_absolute_dt_from_definition(
                                     definition)
                 except:
                     _LOGGER.exception("Error while deriving wakeup time from "
                                       "definition for [%s].", name)
                     raise
 
-                run_times.append((absolute_dt, (name, definition, g, l)))
+                if next_dt < now_dt:
+                    _LOGGER.warning("Job [%s] will never be called: [%s]. Not "
+                                    "scheduling.", name, next_dt)
+
+                    continue
+
+                run_times.append((next_dt, (name, definition, g, l)))
 
             # Load scheduling queue.
 
@@ -293,6 +304,12 @@ class QueueService(
 
                 next_dt = self.__get_absolute_dt_from_definition(definition)
 
+                if next_dt < now_dt:
+                    _LOGGER.warning("Job [%s] will never [again] be called: "
+                                    "[%s]. Not rescheduling.", name, next_dt)
+
+                    continue
+
                 _LOGGER.debug("Proactively rescheduling job [%s] for [%s].", 
                               name, next_dt)
 
@@ -314,7 +331,17 @@ class QueueService(
         _LOGGER.debug("Running job: [%s]", name)
 
         fn = definition['RUN_ROUTINE']
-        exec fn.__code__ in l
+        
+        try:
+            exec fn.__code__ in l
+        except:
+            self.__bus.push_message(
+                scheduler.constants.MT_QUEUE_TASK_FAILED,
+                (name, traceback.format_exc()))
+        else:
+            self.__bus.push_message(
+                scheduler.constants.MT_QUEUE_TASK_SUCCESS,
+                name)
 
     def get_idle_interval_s(self):
         """Return the number of seconds to wait when nothing is done. Mutually 
