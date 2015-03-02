@@ -36,13 +36,16 @@ class Reactor(object):
         _LOGGER.info("Starting up.")
 
         self.__bus_service.start()
+        _LOGGER.info("Started bus service.")
         started.append(self.__bus_service)
 
         try:
             self.__jobs_service.start()
+            _LOGGER.info("Started jobs service.")
             started.append(self.__jobs_service)
 
             self.__queue_service.start()
+            _LOGGER.info("Started queue service.")
             started.append(self.__queue_service)
 
             # Enter main loop.
@@ -56,6 +59,8 @@ class Reactor(object):
 
             # Shut the services down in reverse.
             for service_obj in started[::-1]:
+                _LOGGER.info("Stopping service: [%s]", service_obj.__class__.__name__)
+
                 try:
                     service_obj.stop()
                 except:

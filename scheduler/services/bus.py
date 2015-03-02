@@ -64,7 +64,7 @@ class BusService(scheduler.services.service.Service):
                 _LOGGER.warning("Discarding unroutable bus message: [%s]", 
                                 name)
 
-                _LOGGER.debug("Listeners are:\n%s", dict(self.__listeners))
+#                _LOGGER.debug("Listeners are:\n%s", dict(self.__listeners))
             else:
                 _LOGGER.debug("Forwarding bus message of type [%s]: [%s]", 
                               name, handler.__class__.__name__)
