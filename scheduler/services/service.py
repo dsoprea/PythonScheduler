@@ -1,8 +1,29 @@
 import logging
 import threading
 import datetime
+import math
+
+_MAX_ERROR_CHECK_CYCLES = 100
+_MAX_ERROR_CHECK_HISTORY_SIZE = 10
 
 _LOGGER = logging.getLogger(__name__)
+#_LOGGER.setLevel(logging.INFO)
+
+
+class InvocationDelay(object):
+    def __init__(self, seconds):
+        self.__seconds = seconds
+
+    def get_seconds(self):
+        return self.__seconds
+
+
+class InvocationDateTimeDelay(InvocationDelay):
+    def __init__(self, dt):
+        now_dt = datetime.datetime.now()
+        seconds = (dt - now_dt).seconds
+
+        super(InvocationDateTimeDelay, self).__init__(seconds)
 
 
 class Service(object):
@@ -11,44 +32,31 @@ class Service(object):
         self.__start_lock = threading.Lock()
         self.__t = None
 
+    def do_run_immediately(self):
+        """Whether to run before scheduling, or schedule before running the 
+        first time.
+        """
+
+        return True
+
     def __schedule(self):
         """Figure out when we're next supposed to run, and schedule it."""
 
 #        _LOGGER.debug("SCHEDULE: [%s]", self.__class__.__name__)
 
-        try:
-            wait_s = self.get_idle_interval_s()
-        except NotImplementedError:
-            wait_s = None
-        else:
-            assert wait_s > 0, "Wait interval must be positive: " + str(wait_s)
+        delay = self.get_invocation_delay()
+        assert issubclass(delay.__class__, InvocationDelay), \
+               "Invocation-delay must be an InvocationDelay."
 
-        try:
-            wait_dt = self.get_next_run_dt()
-        except NotImplementedError:
-            wait_dt = None
+        wait_s = delay.get_seconds()
 
-        if ((wait_s is not None) ^ (wait_dt is not None)) is False:
-            if wait_s is None:
-                raise ValueError("Neither the interval nor the next-"
-                                 "run time was set for the service.")
-            else:
-                raise ValueError("Only the interval *or* the next-"
-                                 "run time should be set for the "
-                                 "service.")
+        _LOGGER.debug("[%s] will wakeup in (%d) seconds.", 
+                      self.__class__.__name__, wait_s)
 
-        if wait_dt is not None:
-            now_dt = datetime.datetime.now()
-            wait_s = (wait_dt - now_dt).seconds
-
-            # This might occur due to resolution-related error if the time 
-            # scheduled is minutely behind the current time.
-            if wait_s < 0:
-                _LOGGER.debug("Wakeup time is in the past: WHEN_S=(%d) "
-                              "WHEN_DT=[%s] NOW_DT=[%s]", 
-                              wait_s, wait_dt, now_dt)
-
-                wait_s = 0
+# TODO(dustin): This is bad business. Sometimes due to timing or, simply, math, sometimes we'll have to schedule for the current moment.
+#        assert wait_s > 0, \
+#               "The time that we're going to wakeup is either now or in the " \
+#               "past."
 
 #        _LOGGER.debug("ABOUT TO CALL: [%s]", self.__class__.__name__)
 
@@ -58,8 +66,9 @@ class Service(object):
             if self.__quit_ev.is_set() is True:
                 return
 
-#            _LOGGER.debug("TIMER [%s]: (%d)", self.__class__.__name__, wait_s)
-
+            _LOGGER.debug("TIMER [%s]: WAIT=(%d)", 
+                          self.__class__.__name__, wait_s)
+# TODO(dustin): Do we have to clean this up?
             self.__t = threading.Timer(wait_s, self.__cycle)
             self.__t.start()
 
@@ -76,15 +85,20 @@ class Service(object):
 
         # We found something to do. Call back, immediately.
         if result is True:
+            _LOGGER.debug("Running service-cycle again, immediately.")
             self.__cycle()
         # We were idle. Wait an interval before calling back.
         else:
+            _LOGGER.debug("Scheduling service for sleep.")
             self.__schedule()
 
     def start(self):
         """Do startup tasks, here."""
 
-        self.__schedule()
+        if self.do_run_immediately() is True:
+            self.__cycle()
+        else:
+            self.__schedule()
 
     def stop(self):
         """Do shutdown tasks, here."""
@@ -107,16 +121,9 @@ class Service(object):
 
         raise NotImplementedError()
 
-    def get_idle_interval_s(self):
-        """Return the number of seconds to wait when nothing is done. Mutually 
-        exclusive with get_next_run_dt().
-        """
-
-        raise NotImplementedError()
-
-    def get_next_run_dt(self):
-        """Return the time at which the next cycle should be invoked. 
-        Mutually exclusive with get_idle_interval_s().
+    def get_invocation_delay(self):
+        """Return an InvocationDelay instance describing when to invoke the 
+        next cycle.
         """
 
         raise NotImplementedError()

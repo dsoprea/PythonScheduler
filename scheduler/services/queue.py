@@ -50,19 +50,46 @@ class QueueService(
         self.__state = None
         self.__set_updating_state()
 
-    def __get_next_run_dt_from_time(self, time_obj):
+    def __get_now_dt(self):
         now_dt = datetime.datetime.now()
-        now_time_obj = now_dt.time()
-        if now_time_obj < time_obj:
-            next_run_dt = scheduler.utility.update_time(now_dt, time_obj)
+        now_dt = now_dt.replace(microsecond=0)
+
+        return now_dt
+
+    def __get_next_run_dt_from_time(self, time_obj, start_from_dt=None):
+        """Given a time-of-day, figure-out the datetime of the next occurence 
+        (largely, either that time today or that time tomorrow).
+
+        We're use this to determine the next time to run a task. It might be a
+        common assumption to calculate the next time to run based on the last 
+        time the task was run, and to assume that the current time is equal-to 
+        or greater than the time that the current task was scheduled to run.
+        This is not correct, however: The threading package's timer module 
+        triggers our tasks slighty earlier than scheduled. This means that, 
+        when we do the comparison to determine if the task's time is in the 
+        past or the future, we'll schedule to run the task a moment later.
+
+        Therefore, start_from_dt can be given to base our timings on, to 
+        circumvent this undesirable behavior.
+        """
+
+        if start_from_dt is None:
+            start_from_dt = datetime.datetime.now()
+
+        time_obj = time_obj.replace(microsecond=0)
+
+        start_from_time_obj = start_from_dt.time()
+
+        if start_from_time_obj < time_obj:
+            next_run_dt = scheduler.utility.update_time(start_from_dt, time_obj)
         else:
-            tomorrow_dt = now_dt + datetime.timedelta(seconds=86400)
+            tomorrow_dt = start_from_dt + datetime.timedelta(seconds=86400)
             next_run_dt = scheduler.utility.update_time(tomorrow_dt, time_obj)
 
         return next_run_dt
 
     def __get_next_run_dt_from_interval(self, interval_s):
-        now_dt = datetime.datetime.now()
+        now_dt = self.__get_now_dt()
         next_run_dt = now_dt + datetime.timedelta(seconds=interval_s)
 
         return next_run_dt
@@ -83,7 +110,7 @@ class QueueService(
         _LOGGER.debug("Setting task queue to READY state (and then going to "
                       "sleep).")
 
-        now_dt = datetime.datetime.now()
+        now_dt = self.__get_now_dt()
 
         assert next_run_dt >= now_dt, \
                "Next-run time is in past: [%s]" % (next_run_dt,)
@@ -106,7 +133,7 @@ class QueueService(
                                 NO_JOB_WAKEUP_INTERVAL_S, 
                         next_run_dt=None)
 
-    def __get_absolute_dt_from_definition(self, definition):
+    def __get_absolute_dt_from_definition(self, definition, start_from_dt=None):
         elected_types = [name 
                          for name 
                          in scheduler.config.services.jobs.TIME_FIELDS 
@@ -128,7 +155,8 @@ class QueueService(
 # TODO(dustin): Still need to test time objects.
         elif timing_type == scheduler.constants.JF_TIME_TIME_OBJ:
             absolute_dt = self.__get_next_run_dt_from_time(
-                            definition[scheduler.constants.JF_TIME_TIME_OBJ])
+                            definition[scheduler.constants.JF_TIME_TIME_OBJ],
+                            start_from_dt=start_from_dt)
         elif timing_type == scheduler.constants.JF_TIME_INTERVAL_S:
             interval_s = definition[scheduler.constants.JF_TIME_INTERVAL_S]
 
@@ -174,7 +202,7 @@ class QueueService(
             self.__jobs_dict = jobs_dict
 
             run_times = []
-            now_dt = datetime.datetime.now()
+            now_dt = self.__get_now_dt()
             for name, code_info in jobs_dict.items():
                 (definition, g, l) = code_info
 
@@ -231,6 +259,24 @@ class QueueService(
 
             return False
 
+        now_dt = self.__get_now_dt()
+
+#        # If we're receiving new jobs or recalculating the schedule, we'll be 
+#        # in a holding pattern and switch to a schedule where we wake-up every 
+#        # couple of seconds. When we transition between this state and when 
+#        # we're sleeping between jobs, we may lose some precision. So, we trap 
+#        # that anomaly here.
+#        if scheduled_dt > now_dt:
+#            # Add the task back to the schedule at the original datetime.
+#            self.__schedule_q.put((scheduled_dt, context))
+#
+#            _LOGGER.warning("We ran too early (this may be normal). Going "
+#                            "back to sleep until [%s].", scheduled_dt)
+#
+#            # By returning an empty-list of jobs, we won't do anything, and 
+#            # we'll automatically determine when we need to wake-up.
+#            return (scheduled_dt, [])
+
         # Consistency check.
         assert self.__state.is_empty is False, \
                "The schedule was supposed to be empty."
@@ -255,6 +301,9 @@ class QueueService(
 
             jobs.append(context)
 
+#        _LOGGER.debug("Retrieved (%d) jobs from the queue to process.", 
+#                      len(jobs))
+
         return (scheduled_dt, jobs)
 
     def cycle(self):
@@ -273,6 +322,8 @@ class QueueService(
             return False
 
         with self.__schedule_q_lock:
+            _LOGGER.debug("Running cycle.")
+
             result = self.__get_next_jobs()
 
             if issubclass(result.__class__, bool) is True:
@@ -280,7 +331,7 @@ class QueueService(
 
             (scheduled_dt, jobs) = result
 
-            now_dt = datetime.datetime.now()
+            now_dt = self.__get_now_dt()
             
             # In practice, we're woken up a tiny-bit too early, so this is 
             # usually negative.
@@ -296,13 +347,13 @@ class QueueService(
             for context in jobs:
                 (name, definition, g, l) = context
 
-                _LOGGER.info("Job dequeued: [%s]", name)
-
                 # Reque immediately so that a) we can release the lock, and b) we 
                 # can allow ourselves to forgive exceptions without interrpt future 
                 # attempts.
 
-                next_dt = self.__get_absolute_dt_from_definition(definition)
+                next_dt = self.__get_absolute_dt_from_definition(
+                            definition, 
+                            start_from_dt=scheduled_dt)
 
                 if next_dt < now_dt:
                     _LOGGER.warning("Job [%s] will never [again] be called: "
@@ -314,7 +365,8 @@ class QueueService(
                               name, next_dt)
 
                 self.__schedule_q.put((next_dt, context))
-                self.__peek_and_schedule()
+            
+            self.__peek_and_schedule()
 
 # TODO(dustin): We should fork this into its own thread after we've tested.
 
@@ -343,29 +395,23 @@ class QueueService(
                 scheduler.constants.MT_QUEUE_TASK_SUCCESS,
                 name)
 
-    def get_idle_interval_s(self):
-        """Return the number of seconds to wait when nothing is done. Mutually 
-        exclusive with get_next_run_dt().
-        """
+    def get_invocation_delay(self):
+        if not ((self.__state.next_run_s is None) ^ (self.__state.next_run_dt is None)):
+            raise ValueError("Next-run seconds and date-time are mutually-"
+                             "exclusive.")
 
-        if self.__state.next_run_s is None:
-            raise NotImplementedError()
+        if self.__state.next_run_s is not None:
+            if self.__state.is_empty is True:
+                _LOGGER.debug("Task queue is empty. Sleeping.")
+            else:
+                _LOGGER.debug("It looks like the job queue is currently "
+                              "updating. Sleeping.")
 
-        if self.__state.is_empty is True:
-            _LOGGER.debug("Task queue is empty. Sleeping.")
+            return scheduler.services.service.InvocationDelay(
+                    self.__state.next_run_s)
         else:
-            _LOGGER.debug("It looks like the job queue is currently updating. "
-                          "Sleeping.")
+            _LOGGER.debug("Scheduler going to sleep until: [%s]", 
+                          self.__state.next_run_dt)
 
-        return self.__state.next_run_s
-
-    def get_next_run_dt(self):
-        """Return the number of seconds to wait when nothing is done."""
-
-        if self.__state.next_run_dt is None:
-            raise NotImplementedError()
-
-        _LOGGER.debug("Scheduler going to sleep until: [%s]", 
-                      self.__state.next_run_dt)
-
-        return self.__state.next_run_dt
+            return scheduler.services.service.InvocationDateTimeDelay(
+                    self.__state.next_run_dt)

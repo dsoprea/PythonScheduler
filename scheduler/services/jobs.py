@@ -159,6 +159,8 @@ class JobsService(
                     scheduler.config.services.jobs.ALERT_MESSAGE_JOB_READ_FAILED,
                     traceback.format_exc())
 
+                continue
+
             definition = dict([(k, v) 
                                for (k, v) 
                                in l.items() 
@@ -169,7 +171,7 @@ class JobsService(
             try:
                 if present_fields_s.issuperset(required_fields_s) is False:
                     raise ValueError("Required fields are not [all] present: %s" % 
-                                     (required_s,))
+                                     (required_fields_s,))
                 elif all_fields_s.issuperset(present_fields_s) is False:
                     raise ValueError("One or more fields are not valid: %s" % 
                                      (present_fields_s - all_fields_s,))
@@ -202,10 +204,11 @@ class JobsService(
 
         return self.__update_jobs()
 
-    def get_idle_interval_s(self):
+    def get_invocation_delay(self):
         """Return the number of seconds to wait when nothing is done."""
 
-        return scheduler.config.services.jobs.UPDATE_CHECK_INTERVAL_S
+        return scheduler.services.service.InvocationDelay(
+                scheduler.config.services.jobs.UPDATE_CHECK_INTERVAL_S)
 
     def start(self):
         self.__update_jobs()

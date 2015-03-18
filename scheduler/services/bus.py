@@ -75,7 +75,8 @@ class BusService(scheduler.services.service.Service):
 
         return True
 
-    def get_idle_interval_s(self):
+    def get_invocation_delay(self):
         """Return the number of seconds to wait when nothing is done."""
 
-        return scheduler.config.services.bus.IDLE_WAIT_S
+        return scheduler.services.service.InvocationDelay(
+                scheduler.config.services.bus.IDLE_WAIT_S)
