@@ -7,7 +7,7 @@ _MAX_ERROR_CHECK_CYCLES = 100
 _MAX_ERROR_CHECK_HISTORY_SIZE = 10
 
 _LOGGER = logging.getLogger(__name__)
-#_LOGGER.setLevel(logging.INFO)
+_LOGGER.setLevel(logging.INFO)
 
 
 class InvocationDelay(object):
@@ -21,7 +21,13 @@ class InvocationDelay(object):
 class InvocationDateTimeDelay(InvocationDelay):
     def __init__(self, dt):
         now_dt = datetime.datetime.now()
-        seconds = (dt - now_dt).seconds
+        seconds = (dt - now_dt).total_seconds()
+        _LOGGER.debug("InvocationDateTimeDelay: Wake-up at [%s] translates to "
+                      "(%d) seconds.", dt, seconds)
+
+        assert seconds > 0, \
+               "Time-delay translates to zero or negative seconds: " \
+               "[%s] - [%s] = (%d)s" % (dt, now_dt, seconds)
 
         super(InvocationDateTimeDelay, self).__init__(seconds)
 
@@ -53,22 +59,12 @@ class Service(object):
         _LOGGER.debug("[%s] will wakeup in (%d) seconds.", 
                       self.__class__.__name__, wait_s)
 
-# TODO(dustin): This is bad business. Sometimes due to timing or, simply, math, sometimes we'll have to schedule for the current moment.
-#        assert wait_s > 0, \
-#               "The time that we're going to wakeup is either now or in the " \
-#               "past."
-
-#        _LOGGER.debug("ABOUT TO CALL: [%s]", self.__class__.__name__)
-
         with self.__start_lock:
-#            _LOGGER.debug("ABOUT TO CALL 2: [%s]", self.__class__.__name__)
-
             if self.__quit_ev.is_set() is True:
                 return
 
-            _LOGGER.debug("TIMER [%s]: WAIT=(%d)", 
-                          self.__class__.__name__, wait_s)
 # TODO(dustin): Do we have to clean this up?
+
             self.__t = threading.Timer(wait_s, self.__cycle)
             self.__t.start()
 

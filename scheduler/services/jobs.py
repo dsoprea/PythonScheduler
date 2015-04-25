@@ -50,7 +50,7 @@ class JobsService(
         # We might not have loaded the jobs, yet.
         if self.__jobs is not None:
             context = self.__jobs[job_name]
-            (definition, g, l) = context
+            (definition, l) = context
 
             if is_success is True:
                 email_list_field = scheduler.constants.JF_EMAIL_SUCCESS_EMAIL_LIST
@@ -138,17 +138,10 @@ class JobsService(
             # Now, "execute" the code, and pull out the locals (the variables 
             # that are defined).
 
-            g = {
-                '__builtins__': __builtins__, 
-                '__name__': 'job:' + name, 
-                '__doc__': None, 
-                '__package__': None,
-            }
-
             l = {}
 
             try:
-                exec obj in g, l
+                exec obj in l
             except:
                 _LOGGER.exception("There was an uncaught exception while "
                                   "reading: [%s]", name)
@@ -184,7 +177,7 @@ class JobsService(
                     scheduler.config.services.jobs.ALERT_MESSAGE_JOB_READ_FAILED,
                     traceback.format_exc())
             else:
-                jobs[name] = (definition, g, l)
+                jobs[name] = (definition, l)
 
         self.__jobs = jobs
         self.__last_state_hash = state_hash

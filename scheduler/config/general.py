@@ -1,4 +1,5 @@
 import os
+import datetime
 
 IS_DEBUG = bool(int(os.environ.get('IS_DEBUG', '0')))
 
@@ -23,3 +24,8 @@ else:
     ADMIN_FAIL_EMAIL_LIST = []
 
 EMAIL_FROM_NAME = 'Scheduler'
+
+# The amount of error that we will expect or account for in when we wake-up 
+# compared with when we were *scheduled* to wake-up.
+TIMING_PRECISION_S = 5
+TIMING_PRECISION_TD = datetime.timedelta(seconds=TIMING_PRECISION_S)
