@@ -100,35 +100,40 @@ class JobsService(
         else:
             raise ValueError("Did not handle message: [%s]" % (name,))
 
-    def __update_jobs(self):
+    def __get_available_jobs(self):
+        _LOGGER.debug("Listing available jobs.")
+
         path = scheduler.config.services.jobs.JOB_PATH
 # TODO(dustin): Implement `inotify`.
         job_filenames = os.listdir(path)
 
         # Determine if anything has changed.
 
+        job_files = []
         state_list = []
         for filename in job_filenames:
             filepath = os.path.join(path, filename)
+
+            job_files.append((filepath, filename))
+
             epoch = os.stat(filepath).st_mtime
             state_list.append(filename + '=' + str(epoch))
+
 # TODO(dustin): We should also incorporate a dynamic list of jobs managed by API.
+
         state_hash = hashlib.md5(','.join(state_list)).hexdigest()
 
-        if state_hash == self.__last_state_hash:
-            return False
+        return (job_files, state_hash)
 
-        # Reload the jobs.
-
+    def __reload_jobs(self, job_files, state_hash):
         _LOGGER.info("Reloading jobs.")
 
         jobs = {}
         all_fields_s = set(scheduler.config.services.jobs.ALL_FIELDS)
         required_fields_s = set(scheduler.config.services.jobs.REQUIRED_FIELDS)
-        for filename in job_filenames:
+        for filepath, filename in job_files:
             pivot = filename.index('.')
             name = filename[:pivot]
-            filepath = os.path.join(path, filename)
 
             # Compile the config as Python code.
 
@@ -182,6 +187,14 @@ class JobsService(
         self.__jobs = jobs
         self.__last_state_hash = state_hash
 
+    def __update_jobs(self):
+        (job_files, state_hash) = self.__get_available_jobs()
+
+        if state_hash == self.__last_state_hash:
+            return False
+
+        self.__reload_jobs(job_files, state_hash)
+
         # Notify the scheduler that there has been a change.
 
         self.__bus.push_message(
@@ -206,3 +219,6 @@ class JobsService(
     def start(self):
         self.__update_jobs()
         super(JobsService, self).start()
+
+    def get_last_reported_jobs(self):
+        return (self.__jobs, self.__last_state_hash)
