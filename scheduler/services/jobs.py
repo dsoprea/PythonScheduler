@@ -102,7 +102,7 @@ class JobsService(
 
     def __update_jobs(self):
         path = scheduler.config.services.jobs.JOB_PATH
-# Use inotify once we finish that project.
+# TODO(dustin): Implement `inotify`.
         job_filenames = os.listdir(path)
 
         # Determine if anything has changed.
@@ -112,7 +112,7 @@ class JobsService(
             filepath = os.path.join(path, filename)
             epoch = os.stat(filepath).st_mtime
             state_list.append(filename + '=' + str(epoch))
-
+# TODO(dustin): We should also incorporate a dynamic list of jobs managed by API.
         state_hash = hashlib.md5(','.join(state_list)).hexdigest()
 
         if state_hash == self.__last_state_hash:
